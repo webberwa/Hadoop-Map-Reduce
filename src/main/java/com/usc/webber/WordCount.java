@@ -2,10 +2,10 @@ package com.usc.webber;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.StringTokenizer;
 
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.mapreduce.Job;
@@ -14,77 +14,62 @@ import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-
-class WordCountMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+class WordCountMapper extends Mapper<LongWritable, Text, Text, Text> {
 
     //    private final static IntWritable one = new IntWritable(1);
-    private final static Logger LOGGER = Logger.getLogger(WordCountMapper.class.getName());
     private Text word = new Text();
-    private static IntWritable documentId;
 
     public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 
-        String line = value.toString();
+        String[] lines = value.toString().split("\\t", 2);
+        String documentID = lines[0];
+        String line = lines[1].replaceAll("[^a-zA-Z]", " ").toLowerCase();
         StringTokenizer tokenizer = new StringTokenizer(line);
 
-        // Strip document id from the string
-        if (tokenizer.hasMoreTokens()) {
-            String token = tokenizer.nextToken();
-            LOGGER.info(token);
-            documentId = new IntWritable(Integer.parseInt(token));
-        }
-
-
         while (tokenizer.hasMoreTokens()) {
-            word.set(tokenizer.nextToken());
-
-            context.write(word, documentId);
+            String nextToken = tokenizer.nextToken();
+            word.set(nextToken);
+            context.write(word, new Text(documentID));
         }
-
     }
 }
 
-class WordCountReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+class WordCountReducer extends Reducer<Text, Text, Text, Text> {
 
-    private HashMap<String, HashMap<Integer, Integer>> invertedIndex = new HashMap<>();
+    public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
 
-    public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-        int sum = 0;
+        HashMap<String, Integer> invertedIndex = new HashMap<>();
 
-        // key = word
-        // value = documentId
-        String word = key.toString();
+        for (Text value : values) {
 
+            int frequency = 1;
+            String documentID = value.toString();
 
-        for (IntWritable value : values) {
+            // Get the occurrence of words
+            if (invertedIndex.containsKey(documentID)) {
+                frequency = invertedIndex.get(documentID) + 1;
+            }
 
-//            // Get the occurrence of words
-//            HashMap<Integer, Integer> frequency;
-//
-//            if (invertedIndex.containsKey(word)) {
-//                frequency = invertedIndex.get(word);
-//            } else {
-//                frequency = new HashMap<>();
-//            }
-//
-//            invertedIndex.put(word, );
-
-            sum += value.get();
+            invertedIndex.put(documentID, frequency);
         }
 
-        context.write(key, new IntWritable(sum));
+        // Function to convert HashMap to string
+        String invertedIndexString = "";
+
+        for (Map.Entry<String, Integer> entry : invertedIndex.entrySet()) {
+            String documentID = entry.getKey();
+            Integer frequency = entry.getValue();
+
+            invertedIndexString = invertedIndexString + " " + documentID + ":" + frequency;
+        }
+
+        context.write(key, new Text(invertedIndexString));
     }
 }
 
 public class WordCount {
 
-    private final static Logger LOGGER = Logger.getLogger(WordCountMapper.class.getName());
-
     public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
-
 
         if (args.length != 2) {
             System.err.println("Usage: Word Count <input path> <output path>");
@@ -102,7 +87,7 @@ public class WordCount {
         job.setReducerClass(WordCountReducer.class);
 
         job.setOutputKeyClass(Text.class);
-        job.setOutputValueClass(IntWritable.class);
+        job.setOutputValueClass(Text.class);
         job.waitForCompletion(true);
     }
 }
